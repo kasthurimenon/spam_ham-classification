@@ -1,0 +1,355 @@
+```{r  message==FALSE, warning=FALSE}
+
+r = getOption("repos")
+r["CRAN"] = "http://cran.r-project.org"
+options(repos = r)
+options(repos="https://cran.rstudio.com" )
+
+
+library(caret)
+library(MASS)
+library(ISLR)
+library(readr)
+library(GGally)
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(ROCR)
+library(FNN)
+library(car)
+library(usdm)
+
+```
+
+
+```{r}
+#Create the readDirectory() method below:
+readDirectory <- function(dirname) {
+# Store the emails in a list
+    emails=list();
+# Get a list of filename s in the directory
+    filenames = dir(dirname , full.names=TRUE);
+      for( i in 1:length(filenames)) {
+      emails[[i]] = scan(filenames[i] , what="" , quiet=TRUE);
+      }
+  return (emails )
+  }
+```
+
+
+```{r}
+# Use the readDirectory() method to load the ham train, spam train, ham test, and spam test data sets.
+ham_test <- readDirectory("ham-test")
+dim(ham_test)
+
+ham_train <- readDirectory("ham-train")
+spam_test <- readDirectory("spam-test")
+spam_train <- readDirectory("spam-train")
+
+```
+
+```{r}
+#2d) Print the first element in spam train and the first element in ham train.
+head(spam_train)
+spam_train[1]
+ham_train[1]
+
+```
+
+```{r}
+#Create the makeSortedDictionaryDf() method below:
+makeSortedDictionaryDf <- function(emails) {
+#Returns dataframe sorted by number of times a word appears
+#List of vectors to one big vector
+  dictionaryFull <- unlist(emails)
+#Tabulates the full dictionary
+  tabulateDic <- tabulate(factor(dictionaryFull))
+#Find unique values
+  dictionary <- unique(dictionaryFull)
+#Sort them alphabetically
+  dictionary <- sort(dictionary)
+  dictionaryDf <- data.frame(word=dictionary , count=tabulateDic)
+  sortDictionaryDf <- dictionaryDf[order(dictionaryDf$count, decreasing = TRUE),];
+  return(sortDictionaryDf)
+}
+
+```
+
+Concatenate ham train, spam train, ham test, and spam test in to a single list.
+```{r}
+all_emails <- c(ham_train,ham_test,spam_train,spam_test)
+all_dict <- makeSortedDictionaryDf(all_emails)
+dim(all_dict)
+```
+Create the makeDocumentTermMatrix() method below. This method will create a document term matrix, which converts a data set into a matrix where each row represents a document and each column represents a word. Each element ei;j in the document term matrix is the number of times word j appeared in document i.
+```{r}
+makeDocumentTermMatrix <- function(emails, dictionary) {
+#This takes the emai l and dictionary objects from above and outputs a document term matrix
+  num_emails <- length(emails);
+  num_words <- length(dictionary$word);
+#Instantiate a matrix where rows are documents and columns are words
+  dtm <- mat.or.vec(num_emails, num_words); #A matrix filled with zeros
+  for (i in 1:num_emails){
+    num_words_email <- length(emails[[i]]);
+    email_temp <- emails[[i]];
+    for (j in 1:num_words_email){
+      ind <- which(dictionary$word == email_temp[j]);
+      dtm[i,ind] <- dtm[i,ind] + 1;
+      }
+  }
+    return(dtm)  
+  }
+```
+
+Use makeDocumentTermMatrix() to create dtm ham train, dtm spam train, dtm ham test, and dtm spam test.
+
+```{r}
+dtm_ham_train <- makeDocumentTermMatrix(ham_train,all_dict) # All matrix have same column lenght of 22,781.
+dim(dtm_ham_train)
+dtm_ham_test <- makeDocumentTermMatrix(ham_test,all_dict)
+dtm_spam_train <- makeDocumentTermMatrix(spam_train,all_dict)
+dtm_spam_test <- makeDocumentTermMatrix(spam_test,all_dict)  
+```
+
+Create the makeLogPvec() method
+```{r}
+makeLogPvec <- function(dtm,mu){
+  #Sum up the number of instance per word
+  pvecNoMu <- colSums(dtm)
+    #Sum up number of words
+  nWords <- sum(pvecNoMu)
+  #Get dictionary size
+  dicLen <- length(pvecNoMu)
+  #Incoperate mu and normalize
+  logPvec <- log(pvecNoMu + mu) - log(mu*dicLen + nWords) # vector with probability of words.
+  return(logPvec)
+}
+```
+Use dtm ham train, dtm spam train, and dictionary to make log pvec ham and log pvec spam respectively.Set mu equal to 1/D , where D is the length of dictionary.
+```{r}
+d <- length(all_dict$word)
+d
+mu <- 1/d
+log_pvec_ham <-makeLogPvec(dtm_ham_train,mu)
+log_pvec_spam <-makeLogPvec(dtm_spam_train,mu)
+```
+3c) Create the predictNaiveBayes() method. This method should take in the log probabilities for the ham document and spam document, the prior probability for spam or ham, and a document term matrix to be classiffied. It then returns a vector of 0 or 1, where 0 means ham and 1 means spam.
+
+```{r}
+
+#Prior probabilities
+length(ham_train)
+log_ham_prior <- log(log(length(ham_train))/(log(length(ham_train)) + log(length(spam_train))))
+log_ham_prior
+
+log_spam_prior <- log(log(length(spam_train))/(log(length(spam_train))+ log(length(ham_train))))
+log_spam_prior
+
+#Matrics dimension
+nrow(dtm_spam_test)
+ncol(dtm_spam_test)
+
+#Vector dimension
+NROW(log_pvec_spam)
+NCOL(log_pvec_spam)
+
+
+#Naive Bayes method
+predictNaiveBayes <- function(log_pvec_ham,log_pvec_spam, log_ham_prior,log_spam_prior,
+                              dtm_test) {
+  
+  prob_spam <- dtm_test %*% log_pvec_spam  + log_spam_prior
+  prob_ham  <- dtm_test %*% log_pvec_ham + log_ham_prior
+
+  spam_ham <- ifelse(prob_spam >= prob_ham, "1", "0")
+  return(spam_ham)
+  }
+
+```
+3d)Use the predictNaiveBayes() method to calculate the accuracy, sensitivity (hit rate), and (1-specificity) false alarm rates for the test data sets.
+
+```{r}
+spam <- predictNaiveBayes(log_pvec_ham,log_pvec_spam,log_ham_prior,log_spam_prior,dtm_spam_test)
+spam_ct <- table(spam)
+spam_ct
+sensitivity_spam <- spam_ct[2]/(spam_ct[1]+spam_ct[2]);sensitivity_spam
+false_spam <- spam_ct[1]/(spam_ct[1]+spam_ct[2]);false_spam
+accu_spam = spam_ct[2]/nrow(dtm_spam_test);accu_spam
+
+ham <- predictNaiveBayes(log_pvec_ham,log_pvec_spam,log_ham_prior,log_spam_prior,dtm_ham_test)
+ham_ct <- table(ham)
+ham_ct
+sensitivity_ham <- ham_ct[1]/(ham_ct[1]+ham_ct[2]);sensitivity_ham
+false_ham <- ham_ct[2]/(ham_ct[1]+ham_ct[2]);false_ham
+accu_ham = ham_ct[1]/nrow(dtm_ham_test);accu_ham
+
+```
+3e) Method to calculate average accuracy for 5 folds.
+```{r}
+fiveFoldCV <- function(dtm_ham_train,dtm_spam_train, log_ham_prior, log_spam_prior, mu){
+  # code below
+  err <- c(1:5)
+  #split data into 5 sets
+  n <- nrow(dtm_ham_train)
+  fold_size <- n/5
+  for (i in 1:5){
+    full_range <- 1:n # eg: n=300 (ham train emails)
+    validation_range <- ((i-1)*fold_size + 1):(i*fold_size) #eg - i=1 will be 1:60  
+    train_range <- full_range[! full_range %in% validation_range] #eg - i=1 will be 61:300 
+    
+  # your code here
+    # train on the train_range using makeLogPvec( )
+      log_pvec_ham_trn <-makeLogPvec(dtm_ham_train[train_range,],mu)
+      log_pvec_spam_trn <- makeLogPvec(dtm_spam_train,mu)
+      
+    # validate on the validation range using predictNaiveBayes ( )
+      ham_val <- predictNaiveBayes(log_pvec_ham_trn,log_pvec_spam_trn,log_ham_prior,
+                                   log_spam_prior,dtm_ham_train[validation_range,])
+      ham_val_ct <- table(ham_val)
+# calculate the error rate and store in vector ( did you initialize it ?)
+      err[i] <- ham_val_ct[2]/(ham_val_ct[1]+ham_val_ct[2]) # NUmber of incorrect classification
+     }
+# return the average error or overall folds
+  avg_err = mean(err)
+  return(avg_err)
+  }
+```
+
+Using a for loop, run 5-fold cross validation to select the best mu
+```{r}
+d <- length(all_dict$word)
+mu <- 1/d
+mu_list <- list(mu/100,mu/10,mu,10*mu,100*mu)
+
+j_ind=0
+bestmu = c(1:length(mu_list))
+
+for(m in mu_list){
+    j_ind = j_ind +1
+    bestmu[j_ind] <- fiveFoldCV(dtm_ham_train,dtm_spam_train, log_ham_prior,log_spam_prior,m)
+    }
+
+plot(mu_list,bestmu,xlab = "MU Values", ylab="Error Values")
+
+#Answer - The best mu value is 100*mu.
+
+```
+
+Use the chosen value of mu from the previous question to train the Naive Bayes Classifier on all of the training data. Test on all of the testing data and print the accuracy, sensitivity (hit rate), and (1-specificity) (false alarm rate).
+```{r}
+#new log value
+log_pvec_ham_cvmu <-makeLogPvec(dtm_ham_train,100*mu)
+log_pvec_spam_cvmu <-makeLogPvec(dtm_spam_train,100*mu)
+
+#Naive Bayes with new value on Spam
+spam_cvmu <- predictNaiveBayes(log_pvec_ham_cvmu,log_pvec_spam_cvmu,log_ham_prior,
+                               log_spam_prior,dtm_spam_test)
+spam_ctmu <- table(spam_cvmu)
+spam_ctmu
+sensitivity_spam_cvmu <- spam_ctmu[2]/(spam_ctmu[1]+spam_ctmu[2]);sensitivity_spam_cvmu
+false_spam_cvmu <- spam_ctmu[1]/(spam_ctmu[1]+spam_ctmu[2]);false_spam_cvmu
+accu_spam_cvmu = spam_ctmu[2]/nrow(dtm_spam_test);accu_spam_cvmu
+
+#Naive Bayes with new value on ham
+ham_cvmu <- predictNaiveBayes(log_pvec_ham_cvmu,log_pvec_spam_cvmu,log_ham_prior,
+                              log_spam_prior,dtm_ham_test)
+
+ham_ctmu <- table(ham_cvmu)
+ham_ctmu
+sensitivity_ham_cvmu <- ham_ctmu[1]/(ham_ctmu[1]+ham_ctmu[2]);sensitivity_ham_cvmu
+false_ham_cvmu <- ham_ctmu[2]/(ham_ctmu[1]+ham_ctmu[2]);false_ham_cvmu
+accu_ham_cvmu = ham_ctmu[1]/nrow(dtm_ham_test);accu_ham_cvmu
+
+```
+
+Create the function calculateMI() that calculates the mutual information for all of the words and returns a vector.
+```{r}
+calculateMI <- function(dtm_ham_train,dtm_spam_train) {
+  #calculate verctors mutual information for each word.
+  ham_sums <- colSums(dtm_ham_train)
+  ham_probs <- ham_sums/ sum(ham_sums) # vector of probabilities for each word in ham
+  spam_sums <- colSums(dtm_spam_train)
+  spam_probs <- spam_sums / sum(spam_sums) # vector of probabilities for each word in spam
+  all_sums <- ham_sums + spam_sums
+  all_probs <- all_sums / sum(all_sums) #vector of probabilities for words in entire set
+  mi <- c(1:length (all_probs))
+  for (i in  1:length(all_probs)) {
+    if (all_probs[i]== 0) {
+      mi[i] <- 0 # mutual information -> 0 when p(X=x)=0
+    }
+    else{
+      mi[i] <- .5 * ham_probs[i] * log(ham_probs[i]/all_probs[i])+
+               .5 * (1-ham_probs[i])*log((1 - ham_probs[i])/(1 -all_probs[i]))+  
+               .5 * spam_probs[i]  * log(spam_probs[i]/all_probs[i])+
+               .5 * (1-spam_probs[i]) * log((1 - spam_probs[i])/(1 -all_probs[i]))  
+    }
+  }
+  return(mi)
+}
+```
+
+Use the calculateMI function to get the mutual information vector for all of the words only using the training data.
+```{r}
+mi_vec <- calculateMI(dtm_ham_train,dtm_spam_train)
+NROW(mi_vec)
+NCOL(mi_vec)
+```
+
+Take the n columns of the dtm ham train, dtm ham test, dtm spam train, and dtm spam test matrices with the smallest mutual information. Fit your Naive Bayes Classifier using the training sets with mu = 1/n. Calculate the sensitivity(hit rate), 1-specificity (false alarm rate), and accuracy on the test sets.
+Create 3 plots (sensitivity (hit rate), 1-specificity (false alarm rate), and accuracy) using n = (200; 500; 1000; 2500; 5000; 10000).
+```{r}
+
+sort_mi <- sort(mi_vec,decreasing = FALSE,index.return = TRUE)
+
+nlist <- list (200,500,1000,2500,5000,10000)
+
+# Initialize vector
+sensitivity_spam_cvmi <-c(1:length(nlist))
+false_spam_cvmi <-c(1:length(nlist))
+accu_spam_cvmi  <-c(1:length(nlist))
+
+sensitivity_ham_cvmi <-c(1:length(nlist))
+false_ham_cvmi <-c(1:length(nlist))
+accu_ham_cvmi  <-c(1:length(nlist))
+
+i=0
+
+ for (n in  nlist) { 
+      i=i+1
+      dtm_ham_train_mi <- dtm_ham_train[,sort_mi$ix[1:n]]
+      dtm_ham_test_mi <- dtm_ham_test[,sort_mi$ix[1:n]]
+      dtm_spam_train_mi <- dtm_spam_train[,sort_mi$ix[1:n]]
+      dtm_spam_test_mi <- dtm_spam_test[,sort_mi$ix[1:n]]
+  
+      #new log value
+      log_pvec_ham_cvmi <-makeLogPvec(dtm_ham_train_mi,1/n)
+      log_pvec_spam_cvmi <-makeLogPvec(dtm_spam_train_mi,1/n)
+      
+      #Naive Bayes with new value on Spam
+      spam_cvmi <- predictNaiveBayes(log_pvec_ham_cvmi,log_pvec_spam_cvmi,log_ham_prior,
+                                     log_spam_prior,dtm_spam_test_mi)
+      spam_ctmi <- table(spam_cvmi)
+      spam_ctmi
+      sensitivity_spam_cvmi[i] <- spam_ctmi[2]/(spam_ctmi[1]+spam_ctmi[2])
+      false_spam_cvmi[i] <- spam_ctmi[1]/(spam_ctmi[1]+spam_ctmi[2])#;false_spam_cvmi
+      accu_spam_cvmi[i] = spam_ctmi[2]/nrow(dtm_spam_test_mi);accu_spam_cvmi
+      
+      #Naive Bayes with new value on ham
+      ham_cvmi <- predictNaiveBayes(log_pvec_ham_cvmi,log_pvec_spam_cvmi,log_ham_prior,
+                                    log_spam_prior,dtm_ham_test_mi)
+      
+      ham_ctmi <- table(ham_cvmi)
+      ham_ctmi
+      sensitivity_ham_cvmi[i] <- ham_ctmi[1]/(ham_ctmi[1]+ham_ctmi[2]);sensitivity_ham_cvmi
+      false_ham_cvmi[i] <- ham_ctmi[2]/(ham_ctmi[1]+ham_ctmi[2]);false_ham_cvmi
+      accu_ham_cvmi[i] = ham_ctmi[1]/nrow(dtm_ham_test_mi);accu_ham_cvmi
+  }
+
+plot(nlist,sensitivity_spam_cvmi, xlab = "MU values", ylab = "Spam Sensitivity")
+plot(nlist,false_spam_cvmi, xlab = "MU values", ylab = "Spam False Rate")
+plot(nlist,accu_spam_cvmi, xlab = "MU values", ylab = "Spam Accuracy")
+
+plot(nlist,sensitivity_ham_cvmi, xlab = "MU values", ylab = "Ham Sensitivity")
+plot(nlist,false_ham_cvmi, xlab = "MU values", ylab = "Ham False Rate")
+plot(nlist,accu_ham_cvmi, xlab = "MU values", ylab = "Spam Accuracy")
+
